@@ -1,14 +1,26 @@
-import { Duration, Effect, Logger } from "effect";
+import { Duration, Effect, Logger, Layer } from "effect";
 import { connectToWhatsApp, type ConnectionState } from "./src/connection";
 import { createMessageHandler } from "./src/message-handler";
 import { loadConfig, type Config } from "./src/config";
 import { listAllGroups, logGroupsForDiscovery } from "./src/groups";
+import { OpenRouterServiceLayer, ConfigError } from "./src/openrouter";
 
 /**
  * Application logger layer using Effect's pretty logger.
  * Provides human-readable colored output for development.
  */
 const AppLoggerLive = Logger.pretty;
+
+/**
+ * Main application layer combining logger and OpenRouter config.
+ * ConfigError will be caught at runtime with proper handling.
+ */
+const AppLayer = Layer.merge(
+	AppLoggerLive,
+	Layer.catchAll(OpenRouterServiceLayer, (error) =>
+		Layer.die(`OpenRouter configuration failed: ${error.reason}`),
+	),
+);
 
 /**
  * Log configuration summary showing which groups are being monitored.
@@ -45,7 +57,7 @@ const handleConnectionChange = (config: Config) => {
 						yield* Effect.logWarning("Logged out - scan QR code again");
 						break;
 				}
-			}).pipe(Effect.provide(AppLoggerLive)),
+			}).pipe(Effect.provide(AppLayer)),
 		);
 	};
 };
@@ -70,16 +82,16 @@ const handleConnected = (socket: import("@whiskeysockets/baileys").WASocket, con
  */
 const startWhatsAppListener = (config: Config) =>
 	Effect.gen(function* () {
-		const handleMessage = createMessageHandler(config, AppLoggerLive);
+		const handleMessage = createMessageHandler(config, AppLayer);
 
 		yield* connectToWhatsApp({
 			onStateChange: handleConnectionChange(config),
 			onConnected: (socket) => {
-				Effect.runFork(handleConnected(socket, config).pipe(Effect.provide(AppLoggerLive)));
+				Effect.runFork(handleConnected(socket, config).pipe(Effect.provide(AppLayer)));
 			},
 			onMessage: handleMessage,
 			onReconnect: () => {
-				Effect.runFork(startWhatsAppListener(config).pipe(Effect.provide(AppLoggerLive)));
+				Effect.runFork(startWhatsAppListener(config).pipe(Effect.provide(AppLayer)));
 			},
 		});
 
@@ -102,7 +114,14 @@ const program = Effect.gen(function* () {
  */
 Effect.runPromise(
 	program.pipe(
-		Effect.provide(AppLoggerLive),
+		Effect.provide(AppLayer),
+		Effect.catchTag("ConfigError", (error) =>
+			Effect.gen(function* () {
+				yield* Effect.logError(`Configuration error: ${error.reason}`);
+				yield* Effect.logError("Please set OPENROUTER_API_KEY environment variable");
+				yield* Effect.sync(() => process.exit(1));
+			}),
+		),
 		Effect.catchAll((error) =>
 			Effect.gen(function* () {
 				yield* Effect.logError(`Fatal error: ${error}`);
