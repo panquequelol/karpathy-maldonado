@@ -2,22 +2,25 @@ import { Data, Effect } from "effect";
 
 const CONFIG_ENV_KEYS = {
 	WHATSAPP_ALLOWED_GROUPS: "WHATSAPP_ALLOWED_GROUPS",
-	WHATSAPP_LIST_GROUPS_ON_START: "WHATSAPP_LIST_GROUPS_ON_START",
 } as const;
 
 type GroupJid = `${string}@g.us`;
 
-interface Config {
+type AppMode = "monitor" | "discovery";
+
+interface MonitorConfig {
+	readonly mode: "monitor";
 	readonly allowedGroupJids: ReadonlyArray<GroupJid>;
-	readonly listGroupsOnStart: boolean;
 }
 
+interface DiscoveryConfig {
+	readonly mode: "discovery";
+}
+
+type Config = MonitorConfig | DiscoveryConfig;
+
 class ConfigError extends Data.TaggedError("ConfigError")<{
-	readonly reason:
-		| "MissingAllowedGroups"
-		| "EmptyAllowedGroups"
-		| "InvalidGroupJid"
-		| "InvalidJidFormat";
+	readonly reason: "InvalidJidFormat";
 	readonly value?: string;
 	readonly context?: string;
 }> {
@@ -30,27 +33,13 @@ class ConfigError extends Data.TaggedError("ConfigError")<{
 }
 
 const parseAllowedGroups = (
-	envValue: string | undefined,
+	envValue: string,
 ): Effect.Effect<ReadonlyArray<GroupJid>, ConfigError> =>
 	Effect.gen(function* () {
-		if (envValue === undefined || envValue === "") {
-			return yield* Effect.fail(
-				new ConfigError({
-					reason: "MissingAllowedGroups",
-					context: "WHATSAPP_ALLOWED_GROUPS is required. Set WHATSAPP_LIST_GROUPS_ON_START=true to discover group JIDs.",
-				}),
-			);
-		}
-
 		const jids = envValue.split(",").map((jid) => jid.trim()).filter((jid) => jid.length > 0);
 
 		if (jids.length === 0) {
-			return yield* Effect.fail(
-				new ConfigError({
-					reason: "EmptyAllowedGroups",
-					context: "WHATSAPP_ALLOWED_GROUPS cannot be empty.",
-				}),
-			);
+			return [] as ReadonlyArray<GroupJid>;
 		}
 
 		const validJids = jids.filter((jid): jid is GroupJid => jid.endsWith("@g.us"));
@@ -67,34 +56,36 @@ const parseAllowedGroups = (
 
 		if (validJids.length !== jids.length) {
 			const invalid = jids.filter((jid) => !jid.endsWith("@g.us"));
-			yield* Effect.logWarning(`⚠️  Invalid group JIDs will be ignored: ${invalid.join(", ")}`);
+			yield* Effect.logWarning(`Invalid group JIDs ignored: ${invalid.join(", ")}`);
 		}
 
 		return validJids;
 	});
 
-const parseListGroupsOnStart = (envValue: string | undefined): boolean => {
-	if (envValue === undefined || envValue === "") return false;
-
-	const normalized = envValue.toLowerCase().trim();
-	return normalized === "true" || normalized === "1" || normalized === "yes";
-};
-
 const loadConfig = (): Effect.Effect<Config, ConfigError> =>
 	Effect.gen(function* () {
 		const allowedGroupsEnv = process.env[CONFIG_ENV_KEYS.WHATSAPP_ALLOWED_GROUPS] as string | undefined;
-		const listGroupsEnv = process.env[CONFIG_ENV_KEYS.WHATSAPP_LIST_GROUPS_ON_START] as string | undefined;
+
+		if (allowedGroupsEnv === undefined || allowedGroupsEnv === "") {
+			yield* Effect.logInfo("No groups configured - entering discovery mode");
+			return { mode: "discovery" } as const;
+		}
 
 		const allowedGroupJids = yield* parseAllowedGroups(allowedGroupsEnv);
 
+		if (allowedGroupJids.length === 0) {
+			yield* Effect.logInfo("No valid groups configured - entering discovery mode");
+			return { mode: "discovery" } as const;
+		}
+
 		return {
+			mode: "monitor",
 			allowedGroupJids,
-			listGroupsOnStart: parseListGroupsOnStart(listGroupsEnv),
 		} as const;
 	});
 
 const isGroupAllowed = (config: Config, groupJid: GroupJid): boolean =>
-	config.allowedGroupJids.includes(groupJid);
+	config.mode === "monitor" && config.allowedGroupJids.includes(groupJid);
 
-export type { Config };
-export { ConfigError, CONFIG_ENV_KEYS, isGroupAllowed, loadConfig, parseAllowedGroups, parseListGroupsOnStart };
+export type { AppMode, Config, DiscoveryConfig, GroupJid, MonitorConfig };
+export { ConfigError, CONFIG_ENV_KEYS, isGroupAllowed, loadConfig, parseAllowedGroups };

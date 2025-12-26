@@ -15,11 +15,9 @@ const AppLoggerLive = Logger.pretty;
  */
 const logConfigSummary = (config: Config): Effect.Effect<void> =>
 	Effect.gen(function* () {
-		const count = config.allowedGroupJids.length;
-		const groupWord = count === 1 ? "group" : "groups";
-		yield* Effect.log(`🎧 Listening to ${count} ${groupWord}`);
-		for (const jid of config.allowedGroupJids) {
-			yield* Effect.log(`   - ${jid}`);
+		if (config.mode === "monitor") {
+			const count = config.allowedGroupJids.length;
+			yield* Effect.log(`Listening to ${count} group${count === 1 ? "" : "s"}: ${config.allowedGroupJids.join(", ")}`);
 		}
 	});
 
@@ -32,18 +30,19 @@ const handleConnectionChange = (config: Config) => {
 		Effect.runFork(
 			Effect.gen(function* () {
 				switch (state.status) {
-					case "connecting":
-						yield* Effect.logDebug("⏳ Connecting to WhatsApp...");
-						break;
 					case "connected":
-						yield* Effect.logInfo("✅ Connected!");
+						yield* Effect.logInfo("Connected");
 						yield* logConfigSummary(config);
 						break;
 					case "disconnected":
-						yield* Effect.logError("❌ Disconnected from WhatsApp");
+						if (state.shouldReconnect) {
+							yield* Effect.logWarning("Disconnected - reconnecting...");
+						} else {
+							yield* Effect.logError("Disconnected from WhatsApp");
+						}
 						break;
 					case "logged-out":
-						yield* Effect.logWarning("🚪 Logged out - please scan QR code again");
+						yield* Effect.logWarning("Logged out - scan QR code again");
 						break;
 				}
 			}).pipe(Effect.provide(AppLoggerLive)),
@@ -52,16 +51,17 @@ const handleConnectionChange = (config: Config) => {
 };
 
 /**
- * Handle post-connection tasks like listing groups.
+ * Handle post-connection tasks like listing groups for discovery.
  */
 const handleConnected = (socket: import("@whiskeysockets/baileys").WASocket, config: Config) =>
 	Effect.gen(function* () {
-		if (config.listGroupsOnStart) {
+		if (config.mode === "discovery") {
 			const groups = yield* Effect.tryPromise({
 				try: () => listAllGroups(socket),
 				catch: (error) => new Error(`Failed to list groups: ${error}`),
 			});
 			yield* Effect.sync(() => logGroupsForDiscovery(groups));
+			yield* Effect.sync(() => process.exit(0));
 		}
 	});
 
@@ -70,9 +70,7 @@ const handleConnected = (socket: import("@whiskeysockets/baileys").WASocket, con
  */
 const startWhatsAppListener = (config: Config) =>
 	Effect.gen(function* () {
-		yield* Effect.log("🚀 Starting WhatsApp Group Message Listener");
-
-		const handleMessage = createMessageHandler(config);
+		const handleMessage = createMessageHandler(config, AppLoggerLive);
 
 		yield* connectToWhatsApp({
 			onStateChange: handleConnectionChange(config),
@@ -107,7 +105,7 @@ Effect.runPromise(
 		Effect.provide(AppLoggerLive),
 		Effect.catchAll((error) =>
 			Effect.gen(function* () {
-				yield* Effect.logError(`💥 Fatal error: ${error}`);
+				yield* Effect.logError(`Fatal error: ${error}`);
 				yield* Effect.sync(() => process.exit(1));
 			}),
 		),

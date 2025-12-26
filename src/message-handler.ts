@@ -1,5 +1,5 @@
-import { proto } from "@whiskeysockets/baileys";
-import { Effect } from "effect";
+import { proto, type WASocket } from "@whiskeysockets/baileys";
+import { Effect, Layer } from "effect";
 import {
 	createMessageFromProto,
 	formatMessageForLog,
@@ -9,12 +9,13 @@ import {
 import type { Config } from "./config";
 
 const logMessageToConsole = (message: WhatsAppMessage): Effect.Effect<void> =>
-	Effect.log(formatMessageForLog(message)).pipe(
-		Effect.annotateLogs("source", "whatsapp"),
-		Effect.annotateLogs("group", message.groupJid ?? "dm"),
-	);
+	Effect.log(formatMessageForLog(message));
 
 const createIsGroupAllowedFilter = (config: Config) => {
+	if (config.mode === "discovery") {
+		return (_message: WhatsAppMessage): boolean => false;
+	}
+
 	const allowedJids = new Set(config.allowedGroupJids);
 
 	return (message: WhatsAppMessage): boolean => {
@@ -25,6 +26,7 @@ const createIsGroupAllowedFilter = (config: Config) => {
 
 const handleIncomingMessage = (
 	protoMessage: proto.IWebMessageInfo,
+	_socket: WASocket,
 	isGroupAllowed: (message: WhatsAppMessage) => boolean,
 ): Effect.Effect<void> =>
 	Effect.gen(function* () {
@@ -38,13 +40,13 @@ const handleIncomingMessage = (
 		Effect.catchAll((error) => Effect.logError(`Failed to handle message: ${error}`)),
 	);
 
-const createMessageHandler = (config: Config) => {
+const createMessageHandler = (config: Config, loggerLayer: Layer.Layer<never>) => {
 	const isGroupAllowed = createIsGroupAllowedFilter(config);
 
 	// Run in background fiber - this is the edge of our Effect program
 	// where we integrate with Baileys' non-Effect callback system
-	return (protoMessage: proto.IWebMessageInfo): void => {
-		Effect.runFork(handleIncomingMessage(protoMessage, isGroupAllowed));
+	return (socket: WASocket, protoMessage: proto.IWebMessageInfo): void => {
+		Effect.runFork(handleIncomingMessage(protoMessage, socket, isGroupAllowed).pipe(Effect.provide(loggerLayer)));
 	};
 };
 
