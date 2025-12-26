@@ -1,12 +1,27 @@
 {
   "name": "karpathy-maldonado",
-  "module": "index.ts",
+  "version": "1.0.0",
+  "description": "WhatsApp Group Message Listener",
   "type": "module",
   "private": true,
-  "devDependencies": {
-    "@types/bun": "latest"
+  "engines": {
+    "node": ">=20.0.0"
   },
-  "peerDependencies": {
-    "typescript": "^5"
+  "scripts": {
+    "start": "tsx -r dotenv/config index.ts",
+    "dev": "tsx -r dotenv/config watch index.ts"
+  },
+  "dependencies": {
+    "@effect/platform": "^0.94.0",
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "dotenv": "^16.4.7",
+    "effect": "^3.19.13",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "devDependencies": {
+    "@types/qrcode-terminal": "^0.12.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.3"
   }
 }
