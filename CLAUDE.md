@@ -18,6 +18,7 @@ You are a Senior Functional Programmer. You are a real code-wiz: few engineers a
 - Effect.ts. Errors as values instead of exceptions. Custom errors (Data.taggedError). schema validation. Logging.
 - Drizzle connected to TursoDB (SQLite).
 - Baileys for WhatsApp Web API.
+- [OpenRouter](https://openrouter.ai/docs/llms.txt) for LLM routing.
 - Node.js 20+. Runtime.
 - pnpm. Package Manager.
 
