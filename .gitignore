@@ -1,34 +1,35 @@
-# dependencies (bun install)
+# dependencies
 node_modules
 
-# output
+# build output
 out
 dist
 *.tgz
 
-# code coverage
-coverage
-*.lcov
+# environment
+.env
+.env.*
+!.env.example
+
+# WhatsApp auth session (sensitive)
+auth_info*
 
 # logs
+*.log
 logs
-_.log
-report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
-
-# dotenv environment variable files
-.env
-.env.development.local
-.env.test.local
-.env.production.local
-.env.local
 
 # caches
 .eslintcache
 .cache
 *.tsbuildinfo
+.TSBuildInfo
 
-# IntelliJ based IDEs
+# IDE
 .idea
+.vscode
+*.swp
+*.swo
 
-# Finder (MacOS) folder config
+# OS
 .DS_Store
+Thumbs.db
