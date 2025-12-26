@@ -1,4 +1,4 @@
-import { proto } from "@whiskeysockets/baileys";
+import { proto, downloadMediaMessage, type WASocket } from "@whiskeysockets/baileys";
 import { Data, Effect } from "effect";
 
 const MessageType = {
@@ -19,6 +19,12 @@ type GroupJid = `${string}@g.us`;
 type UserJid = `${string}@s.whatsapp.net`;
 type Jid = GroupJid | UserJid;
 
+interface MediaInfo {
+	readonly mimeType: string;
+	readonly data: string; // base64
+	readonly caption: string | null;
+}
+
 interface WhatsAppMessage {
 	readonly id: string;
 	readonly fromJid: Jid;
@@ -26,6 +32,7 @@ interface WhatsAppMessage {
 	readonly author: UserJid | null;
 	readonly type: MessageTypeValue;
 	readonly content: string | null;
+	readonly media: MediaInfo | null;
 	readonly timestamp: number;
 	readonly groupJid: GroupJid | null;
 }
@@ -81,6 +88,42 @@ const extractTimestamp = (ts: proto.IWebMessageInfo["messageTimestamp"]): number
 	return numTs;
 };
 
+const downloadMedia = (
+	protoMessage: proto.IWebMessageInfo,
+): Effect.Effect<MediaInfo, Error> =>
+	Effect.gen(function* () {
+		const buffer = yield* Effect.tryPromise({
+			try: () => downloadMediaMessage(protoMessage as any, "buffer", {}) as Promise<Buffer>,
+			catch: (error) => new Error(`Failed to download media: ${error}`),
+		});
+
+		const message = protoMessage.message;
+		if (!message) {
+			return yield* Effect.fail(new Error("No message content"));
+		}
+
+		const getMimeType = (): string => {
+			if (message.imageMessage) return message.imageMessage.mimetype ?? "image/jpeg";
+			if (message.videoMessage) return message.videoMessage.mimetype ?? "video/mp4";
+			if (message.audioMessage) return message.audioMessage.mimetype ?? "audio/mpeg";
+			if (message.documentMessage) return message.documentMessage.mimetype ?? "application/octet-stream";
+			if (message.stickerMessage) return message.stickerMessage.mimetype ?? "image/webp";
+			return "application/octet-stream";
+		};
+
+		const getCaption = (): string | null => {
+			if (message.imageMessage?.caption) return message.imageMessage.caption;
+			if (message.videoMessage?.caption) return message.videoMessage.caption;
+			return null;
+		};
+
+		return {
+			mimeType: getMimeType(),
+			data: buffer.toString("base64"),
+			caption: getCaption(),
+		} as const;
+	});
+
 const createMessageFromProto = (
 	protoMessage: proto.IWebMessageInfo,
 ): Effect.Effect<WhatsAppMessage, MessageParseError> =>
@@ -95,14 +138,21 @@ const createMessageFromProto = (
 		}
 
 		const isGroup = key.remoteJid?.endsWith("@g.us") ?? false;
+		const messageType = determineMessageType(message);
+		const hasMedia = message.imageMessage ?? message.videoMessage ?? message.audioMessage ?? message.documentMessage ?? message.stickerMessage;
+
+		const mediaResult = hasMedia
+			? yield* Effect.either(downloadMedia(protoMessage))
+			: null;
 
 		return {
 			id: key.id ?? "",
 			fromJid: key.remoteJid as Jid,
 			fromMe: key.fromMe ?? false,
 			author: (key.participant ?? null) as UserJid | null,
-			type: determineMessageType(message),
+			type: messageType,
 			content: extractContent(message),
+			media: mediaResult && mediaResult._tag === "Right" ? mediaResult.right : null,
 			timestamp: extractTimestamp(messageTimestamp),
 			groupJid: isGroup ? (key.remoteJid as GroupJid) : null,
 		} as const;
@@ -112,15 +162,17 @@ const isGroupMessage = (message: WhatsAppMessage): message is WhatsAppMessage & 
 	message.groupJid !== null;
 
 const formatMessageForLog = (message: WhatsAppMessage): string => {
-	const isSeconds = message.timestamp < 10000000000;
-	const timestamp = new Date(isSeconds ? message.timestamp * 1000 : message.timestamp).toISOString();
-	const fromMe = message.fromMe ? "You" : message.author ?? "Unknown";
-	const group = message.groupJid ?? "DM";
-	const content = message.content ?? `[${message.type}]`;
-	return `${timestamp} | ${group} | ${fromMe}: ${content}`;
+	const content = message.content ?? "";
+
+	if (message.media) {
+		const caption = message.media.caption ? ` "${message.media.caption}"` : "";
+		return `[${message.type} ${message.media.mimeType}${caption}] ${content}`;
+	}
+
+	return content || `[${message.type}]`;
 };
 
-export type { ConnectionUpdate, ConnectionState, GroupJid, Jid, MessageTypeValue, WhatsAppMessage };
+export type { ConnectionUpdate, ConnectionState, GroupJid, Jid, MediaInfo, MessageTypeValue, WhatsAppMessage };
 export {
 	MessageParseError,
 	InvalidTimestampError,

@@ -2,9 +2,9 @@ import type { WASocket } from "@whiskeysockets/baileys";
 import type { GroupJid } from "./types";
 
 interface GroupMetadata {
-	id: GroupJid;
-	subject: string;
-	participantCount: number;
+	readonly id: GroupJid;
+	readonly subject: string;
+	readonly participantCount: number;
 }
 
 const listAllGroups = async (socket: WASocket): Promise<ReadonlyArray<GroupMetadata>> => {

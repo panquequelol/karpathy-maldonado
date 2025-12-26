@@ -53,7 +53,7 @@ const determineConnectionState = (
 
 const displayQRCode = (qr: string): Effect.Effect<void> =>
 	Effect.gen(function* () {
-		yield* Effect.log("\n📱 Scan this QR code with WhatsApp → Linked Devices:");
+		yield* Effect.log("\nScan QR code with WhatsApp → Linked Devices:");
 		yield* Effect.sync(() => {
 			QRCode.generate(qr, { small: true });
 		});
@@ -63,18 +63,15 @@ const logConnectionState = (state: ConnectionState): Effect.Effect<void> =>
 	Effect.gen(function* () {
 		switch (state.status) {
 			case "logged-out":
-				yield* Effect.logWarning("📴 Logged out from WhatsApp");
+				yield* Effect.logWarning("Logged out from WhatsApp");
 				break;
 			case "disconnected":
 				if (state.shouldReconnect) {
-					yield* Effect.log("🔄 Connection closed, reconnecting in 5 seconds...");
+					yield* Effect.log("Reconnecting in 5 seconds...");
 				}
 				break;
 			case "connected":
-				yield* Effect.logInfo("✅ Connected to WhatsApp");
-				break;
-			case "connecting":
-				yield* Effect.logDebug("⏳ Connecting to WhatsApp...");
+				yield* Effect.logInfo("Connected to WhatsApp");
 				break;
 		}
 	});
@@ -82,16 +79,17 @@ const logConnectionState = (state: ConnectionState): Effect.Effect<void> =>
 type ConnectionCallbacks = {
 	readonly onStateChange: (state: ConnectionState) => void;
 	readonly onConnected: (socket: WASocket) => void;
-	readonly onMessage: (message: proto.IWebMessageInfo) => void;
+	readonly onMessage: (socket: WASocket, message: proto.IWebMessageInfo) => void;
 	readonly onReconnect: () => void;
 };
 
 const processMessages = (
 	event: BaileysEventMap["messages.upsert"],
-	handler: (message: proto.IWebMessageInfo) => void,
+	socket: WASocket,
+	handler: (socket: WASocket, message: proto.IWebMessageInfo) => void,
 ): Effect.Effect<void> =>
 	Effect.forEach(event.messages, (message) =>
-		Effect.sync(() => handler(message)),
+		Effect.sync(() => handler(socket, message)),
 	);
 
 const connectToWhatsApp = (
@@ -141,7 +139,7 @@ const connectToWhatsApp = (
 				});
 
 				socket.ev.on("messages.upsert", (messages) => {
-					Effect.runFork(processMessages(messages, callbacks.onMessage));
+					Effect.runFork(processMessages(messages, socket, callbacks.onMessage));
 				});
 			},
 		);
