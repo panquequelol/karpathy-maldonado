@@ -1,24 +1,17 @@
-import { Data, Effect, Ref } from "effect";
-
-const CONFIG_ENV_KEYS = {
-	WHATSAPP_ALLOWED_GROUPS: "WHATSAPP_ALLOWED_GROUPS",
-} as const;
-
-const makeConfigRef = (): Effect.Effect<Ref.Ref<Config>, ConfigError> =>
-	Effect.map(loadConfig(), (config) => Ref.unsafeMake(config));
+import { Data, Effect, Ref, Config } from "effect";
 
 type GroupJid = `${string}@g.us`;
 
 type AppMode = "monitor" | "discovery";
 
-interface MonitorConfig {
+type MonitorConfig = {
 	readonly mode: "monitor";
 	readonly allowedGroupJids: ReadonlyArray<GroupJid>;
-}
+};
 
-interface DiscoveryConfig {
+type DiscoveryConfig = {
 	readonly mode: "discovery";
-}
+};
 
 type Config = MonitorConfig | DiscoveryConfig;
 type ConfigRef = Ref.Ref<Config>;
@@ -36,9 +29,7 @@ class ConfigError extends Data.TaggedError("ConfigError")<{
 	}
 }
 
-const parseAllowedGroups = (
-	envValue: string,
-): Effect.Effect<ReadonlyArray<GroupJid>, ConfigError> =>
+const parseAllowedGroups = (envValue: string) =>
 	Effect.gen(function* () {
 		const jids = envValue.split(",").map((jid) => jid.trim()).filter((jid) => jid.length > 0);
 
@@ -66,11 +57,22 @@ const parseAllowedGroups = (
 		return validJids;
 	});
 
-const loadConfig = (): Effect.Effect<Config, ConfigError> =>
+const loadConfig = () =>
 	Effect.gen(function* () {
-		const allowedGroupsEnv = process.env[CONFIG_ENV_KEYS.WHATSAPP_ALLOWED_GROUPS] as string | undefined;
+		const allowedGroupsEnv = yield* Config.string("WHATSAPP_ALLOWED_GROUPS").pipe(
+			Config.withDescription("Comma-separated list of WhatsApp group JIDs to monitor"),
+			Config.withDefault(""),
+		).pipe(
+			Effect.mapError((error) =>
+				new ConfigError({
+					reason: "InvalidJidFormat",
+					value: String(error),
+					context: "Failed to parse WHATSAPP_ALLOWED_GROUPS environment variable",
+				}),
+			),
+		);
 
-		if (allowedGroupsEnv === undefined || allowedGroupsEnv === "") {
+		if (allowedGroupsEnv === "") {
 			yield* Effect.logInfo("No groups configured - entering discovery mode");
 			return { mode: "discovery" } as const;
 		}
@@ -88,10 +90,11 @@ const loadConfig = (): Effect.Effect<Config, ConfigError> =>
 		} as const;
 	});
 
+const makeConfigRef = () =>
+	Effect.map(loadConfig(), (config) => Ref.unsafeMake(config));
+
 const isGroupAllowed = (config: Config, groupJid: GroupJid): boolean =>
 	config.mode === "monitor" && config.allowedGroupJids.includes(groupJid);
 
-export type { AppMode, Config, DiscoveryConfig, GroupJid, MonitorConfig };
-export { ConfigError, CONFIG_ENV_KEYS, isGroupAllowed, loadConfig, parseAllowedGroups, makeConfigRef };
-export type { ConfigRef };
-export { Ref };
+export type { AppMode, Config, ConfigRef, DiscoveryConfig, GroupJid, MonitorConfig };
+export { ConfigError, isGroupAllowed, loadConfig, makeConfigRef, parseAllowedGroups, Ref };
