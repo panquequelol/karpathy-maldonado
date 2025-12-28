@@ -68,11 +68,8 @@ const handleConnectionChange = (config: Config) => {
 const handleConnected = (socket: import("@whiskeysockets/baileys").WASocket, config: Config) =>
 	Effect.gen(function* () {
 		if (config.mode === "discovery") {
-			const groups = yield* Effect.tryPromise({
-				try: () => listAllGroups(socket),
-				catch: (error) => new Error(`Failed to list groups: ${error}`),
-			});
-			yield* Effect.sync(() => logGroupsForDiscovery(groups));
+			const groups = yield* listAllGroups(socket);
+			yield* logGroupsForDiscovery(groups);
 			yield* Effect.sync(() => process.exit(0));
 		}
 	});
@@ -118,7 +115,7 @@ Effect.runPromise(
 		Effect.catchTag("ConfigError", (error) =>
 			Effect.gen(function* () {
 				yield* Effect.logError(`Configuration error: ${error.reason}`);
-				yield* Effect.logError("Please set OPENROUTER_API_KEY environment variable");
+				yield* Effect.logError("Please set OPENROUTER_API_KEY and OPENROUTER_MODEL environment variables");
 				yield* Effect.sync(() => process.exit(1));
 			}),
 		),

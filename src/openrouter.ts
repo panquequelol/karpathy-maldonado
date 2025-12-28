@@ -1,9 +1,5 @@
 import { Effect, Layer, Data, Schema, Context } from "effect";
 
-// ============================================================================
-// Configuration
-// ============================================================================
-
 const OPENROUTER_API_KEY = "OPENROUTER_API_KEY";
 const OPENROUTER_MODEL = "OPENROUTER_MODEL";
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1";
@@ -23,13 +19,12 @@ export class ConfigError extends Data.TaggedError("ConfigError")<{
 	override readonly message = "OpenRouter configuration error";
 }
 
-// Service Tag for OpenRouterConfig
 export const OpenRouterConfig = Context.GenericTag<OpenRouterConfig>("OpenRouterConfig");
 
 export const loadConfig = (): Effect.Effect<OpenRouterConfig, ConfigError> =>
 	Effect.gen(function* () {
 		const apiKey = process.env[OPENROUTER_API_KEY];
-		const model = process.env[OPENROUTER_MODEL] ?? "meta-llama/llama-3.2-3b-instruct:free";
+		const model = process.env[OPENROUTER_MODEL];
 
 		if (!apiKey) {
 			return yield* Effect.fail(
@@ -37,12 +32,14 @@ export const loadConfig = (): Effect.Effect<OpenRouterConfig, ConfigError> =>
 			);
 		}
 
+		if (!model) {
+			return yield* Effect.fail(
+				new ConfigError({ reason: `Missing ${OPENROUTER_MODEL} environment variable` }),
+			);
+		}
+
 		return { apiKey, model } as const;
 	});
-
-// ============================================================================
-// Domain Types - Event
-// ============================================================================
 
 const ClassificationResponseSchema = Schema.Union(
 	Schema.Literal("0"),
@@ -70,10 +67,6 @@ const EventSchema = Schema.Struct({
 export type Event = Schema.Schema.Type<typeof EventSchema>;
 export type Location = Schema.Schema.Type<typeof LocationSchema>;
 export type LocationType = "IN-PERSON" | "ONLINE";
-
-// ============================================================================
-// Errors
-// ============================================================================
 
 export class OpenRouterError extends Data.TaggedError("OpenRouterError")<{
 	readonly reason: string;
@@ -126,20 +119,12 @@ export class ExtractionError extends Data.TaggedError("ExtractionError")<{
 	override readonly message = "Failed to extract event data from message";
 }
 
-// ============================================================================
-// Retry Policy
-// ============================================================================
-
 const isRetryableStatusCode = (status: number): boolean =>
 	status === 429 || // Rate limit
 	status === 500 || // Internal server error
 	status === 502 || // Bad gateway
 	status === 503 || // Service unavailable
 	status === 504; // Gateway timeout
-
-// ============================================================================
-// Prompts
-// ============================================================================
 
 const createClassificationPrompt = (rawText: string): string => {
 	const systemPrompt = `You are a Data Feasibility Validator. Your task is to classify text as either a **Parsable Event (1)** or **Noise/Notification (0)**.
@@ -228,10 +213,6 @@ Retorna ÚNICAMENTE el objeto JSON (sin markdown, sin bloques de código):`;
 		{ role: "user", content: userPrompt },
 	]);
 };
-
-// ============================================================================
-// OpenRouter API Functions
-// ============================================================================
 
 const fetchWithTimeout = (
 	url: string,
@@ -397,10 +378,6 @@ const postChatCompletionWithRetry = (
 		return yield* Effect.fail(error);
 	});
 
-// ============================================================================
-// Public API
-// ============================================================================
-
 export const classifyMessage = (
 	text: string,
 ): Effect.Effect<
@@ -479,10 +456,6 @@ export const extractEvent = (
 		),
 	);
 
-// ============================================================================
-// Utilities
-// ============================================================================
-
 const formatError = (error: unknown): string => {
 	if (error && typeof error === "object" && "_tag" in error) {
 		const tagged = error as { _tag: string; message?: string };
@@ -492,10 +465,6 @@ const formatError = (error: unknown): string => {
 	if (error instanceof Error) return error.message;
 	return String(error);
 };
-
-// ============================================================================
-// Layer
-// ============================================================================
 
 export const OpenRouterServiceLayer = Layer.effect(
 	OpenRouterConfig,

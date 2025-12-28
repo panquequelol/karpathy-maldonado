@@ -8,7 +8,7 @@ const MessageType = {
 	AUDIO: "audio",
 	DOCUMENT: "document",
 	STICKER: "sticker",
-	LLOCATION: "location",
+	LOCATION: "location",
 	CONTACT: "contact",
 	UNKNOWN: "unknown",
 } as const;
@@ -37,26 +37,15 @@ interface WhatsAppMessage {
 	readonly groupJid: GroupJid | null;
 }
 
-interface ConnectionUpdate {
-	readonly connection: "close" | "open" | "connecting";
-	readonly lastDisconnect?: Error;
-}
-
 interface ConnectionState {
 	readonly status: "disconnected" | "connecting" | "connected" | "logged-out";
 	readonly shouldReconnect: boolean;
 }
 
 class MessageParseError extends Data.TaggedError("MessageParseError")<{
-	readonly reason: "MissingKey" | "MissingMessage" | "InvalidTimestamp";
+	readonly reason: "MissingKey" | "MissingMessage";
 }> {
 	override readonly message = "Failed to parse WhatsApp message";
-}
-
-class InvalidTimestampError extends Data.TaggedError("InvalidTimestampError")<{
-	readonly timestamp: unknown;
-}> {
-	override readonly message = "Invalid message timestamp value";
 }
 
 const extractContent = (message: proto.IMessage): string | null => {
@@ -74,7 +63,7 @@ const determineMessageType = (message: proto.IMessage): MessageTypeValue => {
 	if (message.documentMessage) return MessageType.DOCUMENT;
 	if (message.stickerMessage) return MessageType.STICKER;
 	if (message.contactMessage) return MessageType.CONTACT;
-	if (message.locationMessage) return MessageType.LLOCATION;
+	if (message.locationMessage) return MessageType.LOCATION;
 	if (message.conversation || message.extendedTextMessage) return MessageType.TEXT;
 	return MessageType.UNKNOWN;
 };
@@ -93,7 +82,12 @@ const downloadMedia = (
 ): Effect.Effect<MediaInfo, Error> =>
 	Effect.gen(function* () {
 		const buffer = yield* Effect.tryPromise({
-			try: () => downloadMediaMessage(protoMessage as any, "buffer", {}) as Promise<Buffer>,
+			try: () =>
+				downloadMediaMessage(
+					protoMessage as unknown as import("@whiskeysockets/baileys").WAMessage,
+					"buffer",
+					{},
+				) as Promise<Buffer>,
 			catch: (error) => new Error(`Failed to download media: ${error}`),
 		});
 
@@ -172,15 +166,10 @@ const formatMessageForLog = (message: WhatsAppMessage): string => {
 	return content || `[${message.type}]`;
 };
 
-export type { ConnectionUpdate, ConnectionState, GroupJid, Jid, MediaInfo, MessageTypeValue, WhatsAppMessage };
+export type { ConnectionState, GroupJid, Jid, MediaInfo, MessageTypeValue, WhatsAppMessage };
 export {
 	MessageParseError,
-	InvalidTimestampError,
-	MessageType,
 	createMessageFromProto,
-	determineMessageType,
-	extractContent,
-	extractTimestamp,
 	formatMessageForLog,
 	isGroupMessage,
 };
