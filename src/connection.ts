@@ -14,6 +14,7 @@ import type { ConnectionState } from "./types";
 import { baileysLogger } from "./logger";
 
 const AUTH_FOLDER = "auth_info";
+const RECONNECT_DELAY_MS = 5000;
 
 type AuthState = ReturnType<typeof useMultiFileAuthState> extends Promise<infer T> ? T : never;
 
@@ -118,7 +119,7 @@ const connectToWhatsApp = (
 					callbacks.onStateChange(state);
 
 					if (state.status === "disconnected" && state.shouldReconnect) {
-						setTimeout(callbacks.onReconnect, 5000);
+						setTimeout(callbacks.onReconnect, RECONNECT_DELAY_MS);
 					}
 
 					if (state.status === "connected") {
