@@ -1,8 +1,11 @@
-import { Data, Effect } from "effect";
+import { Data, Effect, Ref } from "effect";
 
 const CONFIG_ENV_KEYS = {
 	WHATSAPP_ALLOWED_GROUPS: "WHATSAPP_ALLOWED_GROUPS",
 } as const;
+
+const makeConfigRef = (): Effect.Effect<Ref.Ref<Config>, ConfigError> =>
+	Effect.map(loadConfig(), (config) => Ref.unsafeMake(config));
 
 type GroupJid = `${string}@g.us`;
 
@@ -18,6 +21,7 @@ interface DiscoveryConfig {
 }
 
 type Config = MonitorConfig | DiscoveryConfig;
+type ConfigRef = Ref.Ref<Config>;
 
 class ConfigError extends Data.TaggedError("ConfigError")<{
 	readonly reason: "InvalidJidFormat";
@@ -88,4 +92,6 @@ const isGroupAllowed = (config: Config, groupJid: GroupJid): boolean =>
 	config.mode === "monitor" && config.allowedGroupJids.includes(groupJid);
 
 export type { AppMode, Config, DiscoveryConfig, GroupJid, MonitorConfig };
-export { ConfigError, CONFIG_ENV_KEYS, isGroupAllowed, loadConfig, parseAllowedGroups };
+export { ConfigError, CONFIG_ENV_KEYS, isGroupAllowed, loadConfig, parseAllowedGroups, makeConfigRef };
+export type { ConfigRef };
+export { Ref };

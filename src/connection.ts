@@ -54,7 +54,7 @@ const determineConnectionState = (
 
 const displayQRCode = (qr: string): Effect.Effect<void> =>
 	Effect.gen(function* () {
-		yield* Effect.log("\nScan QR code with WhatsApp → Linked Devices:");
+		yield* Effect.log("\nEscanea el código QR con WhatsApp → Dispositivos vinculados:");
 		yield* Effect.sync(() => {
 			QRCode.generate(qr, { small: true });
 		});
@@ -64,15 +64,15 @@ const logConnectionState = (state: ConnectionState): Effect.Effect<void> =>
 	Effect.gen(function* () {
 		switch (state.status) {
 			case "logged-out":
-				yield* Effect.logWarning("Logged out from WhatsApp");
+				yield* Effect.logWarning("Desconectado de WhatsApp");
 				break;
 			case "disconnected":
 				if (state.shouldReconnect) {
-					yield* Effect.log("Reconnecting in 5 seconds...");
+					yield* Effect.log("Reconectando en 5 segundos...");
 				}
 				break;
 			case "connected":
-				yield* Effect.logInfo("Connected to WhatsApp");
+				yield* Effect.logInfo("Conectado a WhatsApp");
 				break;
 		}
 	});

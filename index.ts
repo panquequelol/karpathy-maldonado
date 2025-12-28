@@ -1,8 +1,8 @@
-import { Duration, Effect, Logger, Layer, Option } from "effect";
+import { Duration, Effect, Logger, Layer, Ref } from "effect";
 import { NodeTerminal } from "@effect/platform-node";
 import { connectToWhatsApp, type ConnectionState } from "./src/connection";
 import { createMessageHandler } from "./src/message-handler";
-import { loadConfig, type Config, type GroupJid } from "./src/config";
+import { makeConfigRef, type ConfigRef, type MonitorConfig } from "./src/config";
 import { listAllGroups } from "./src/groups";
 import { selectGroupInteractively } from "./src/group-selector";
 import { OpenRouterServiceLayer, ConfigError } from "./src/openrouter";
@@ -30,11 +30,13 @@ const AppLayer = Layer.merge(
 /**
  * Log configuration summary showing which groups are being monitored.
  */
-const logConfigSummary = (config: Config): Effect.Effect<void> =>
+const logConfigSummary = (configRef: ConfigRef): Effect.Effect<void> =>
 	Effect.gen(function* () {
+		const config = yield* Ref.get(configRef);
 		if (config.mode === "monitor") {
 			const count = config.allowedGroupJids.length;
-			yield* Effect.log(`Listening to ${count} group${count === 1 ? "" : "s"}: ${config.allowedGroupJids.join(", ")}`);
+			const plural = count === 1 ? "grupo" : "grupos";
+			yield* Effect.log(`Escuchando ${count} ${plural}: ${config.allowedGroupJids.join(", ")}`);
 		}
 	});
 
@@ -42,24 +44,24 @@ const logConfigSummary = (config: Config): Effect.Effect<void> =>
  * Handle connection state changes from Baileys.
  * This is called from non-Effect code, so we run the Effect in the background.
  */
-const handleConnectionChange = (config: Config) => {
+const handleConnectionChange = (configRef: ConfigRef) => {
 	return (state: ConnectionState): void => {
 		Effect.runFork(
 			Effect.gen(function* () {
 				switch (state.status) {
 					case "connected":
-						yield* Effect.logInfo("Connected");
-						yield* logConfigSummary(config);
+						yield* Effect.logInfo("Conectado");
+						yield* logConfigSummary(configRef);
 						break;
 					case "disconnected":
 						if (state.shouldReconnect) {
-							yield* Effect.logWarning("Disconnected - reconnecting...");
+							yield* Effect.logWarning("Desconectado - reconectando...");
 						} else {
-							yield* Effect.logError("Disconnected from WhatsApp");
+							yield* Effect.logError("Desconectado de WhatsApp");
 						}
 						break;
 					case "logged-out":
-						yield* Effect.logWarning("Logged out - scan QR code again");
+						yield* Effect.logWarning("Desconectado - escanea el código QR nuevamente");
 						break;
 				}
 			}).pipe(Effect.provide(AppLayer)),
@@ -69,68 +71,53 @@ const handleConnectionChange = (config: Config) => {
 
 /**
  * Handle post-connection tasks like listing groups for discovery.
- * Returns Option<GroupJid> - some if a group was selected, none if monitoring mode.
+ * Updates the configRef when a group is selected in discovery mode.
  */
 const handleConnected = (
 	socket: import("@whiskeysockets/baileys").WASocket,
-	config: Config,
+	configRef: ConfigRef,
 ) => Effect.gen(function* () {
+		const config = yield* Ref.get(configRef);
+
 		if (config.mode === "discovery") {
 			const groups = yield* listAllGroups(socket);
 
 			if (groups.length === 0) {
-				yield* Effect.logError("No WhatsApp groups found");
+				yield* Effect.logError("No se encontraron grupos de WhatsApp");
 				yield* Effect.sync(() => process.exit(1));
-				return Option.none();
+				return;
 			}
 
 			const selectedGroup = yield* selectGroupInteractively(groups);
-			return Option.some(selectedGroup.id);
+			const monitorConfig: MonitorConfig = {
+				mode: "monitor",
+				allowedGroupJids: [selectedGroup.id],
+			} as const;
+
+			yield* Ref.set(configRef, monitorConfig);
+			yield* Effect.logInfo(`Monitoreando ahora: ${selectedGroup.id}`);
 		}
-
-		return Option.none();
 	});
-
-/**
- * Create monitor config from selected group JID.
- */
-const createMonitorConfig = (groupJid: GroupJid): Config => ({
-	mode: "monitor",
-	allowedGroupJids: [groupJid],
-}) as const;
 
 /**
  * Main WhatsApp listener program.
  */
-const startWhatsAppListener = (config: Config) =>
+const startWhatsAppListener = (configRef: ConfigRef) =>
 	Effect.gen(function* () {
-		const handleMessage = createMessageHandler(config, AppLayer);
+		const handleMessage = createMessageHandler(configRef, AppLayer);
 
 		const socket = yield* connectToWhatsApp({
-			onStateChange: handleConnectionChange(config),
+			onStateChange: handleConnectionChange(configRef),
 			onConnected: (socket) => {
 				Effect.runFork(
-					handleConnected(socket, config).pipe(
+					handleConnected(socket, configRef).pipe(
 						Effect.provide(AppLayer),
-						Effect.flatMap((selectedJidOption) =>
-							Option.match(selectedJidOption, {
-								onNone: () => Effect.void,
-								onSome: (selectedJid) =>
-									Effect.gen(function* () {
-										const monitorConfig = createMonitorConfig(selectedJid);
-										yield* Effect.logInfo(`Now monitoring: ${selectedJid}`);
-										yield* Effect.sync(() => {
-											Effect.runFork(startWhatsAppListener(monitorConfig).pipe(Effect.provide(AppLayer)));
-										});
-									}),
-							}),
-						),
 					),
 				);
 			},
 			onMessage: handleMessage,
 			onReconnect: () => {
-				Effect.runFork(startWhatsAppListener(config).pipe(Effect.provide(AppLayer)));
+				Effect.runFork(startWhatsAppListener(configRef).pipe(Effect.provide(AppLayer)));
 			},
 		});
 
@@ -143,8 +130,8 @@ const startWhatsAppListener = (config: Config) =>
  * Root program that loads config and starts the listener.
  */
 const program = Effect.gen(function* () {
-	const config = yield* loadConfig();
-	yield* startWhatsAppListener(config);
+	const configRef = yield* makeConfigRef();
+	yield* startWhatsAppListener(configRef);
 });
 
 /**

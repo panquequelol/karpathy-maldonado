@@ -1,5 +1,5 @@
 import { proto, type WASocket } from "@whiskeysockets/baileys";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Ref } from "effect";
 import {
 	createMessageFromProto,
 	formatMessageForLog,
@@ -15,17 +15,14 @@ const logMessageToConsole = (message: WhatsAppMessage): Effect.Effect<void> =>
 const logEventToConsole = (event: unknown): Effect.Effect<void> =>
 	Effect.log(`[EVENT EXTRACTED] ${JSON.stringify(event, null, 2)}`);
 
-const createIsGroupAllowedFilter = (config: Config) => {
+const isGroupAllowed = (config: Config, message: WhatsAppMessage): boolean => {
 	if (config.mode === "discovery") {
-		return (_message: WhatsAppMessage): boolean => false;
+		return false;
 	}
-
-	const allowedJids = new Set(config.allowedGroupJids);
-
-	return (message: WhatsAppMessage): boolean => {
-		if (!isGroupMessage(message)) return false;
-		return allowedJids.has(message.groupJid);
-	};
+	if (!isGroupMessage(message)) {
+		return false;
+	}
+	return config.allowedGroupJids.includes(message.groupJid);
 };
 
 const processMessageForEvent = (message: WhatsAppMessage): Effect.Effect<void, never, OpenRouterConfig> =>
@@ -64,12 +61,13 @@ const processMessageForEvent = (message: WhatsAppMessage): Effect.Effect<void, n
 const handleIncomingMessage = (
 	protoMessage: proto.IWebMessageInfo,
 	_socket: WASocket,
-	isGroupAllowed: (message: WhatsAppMessage) => boolean,
+	configRef: Ref.Ref<Config>,
 ): Effect.Effect<void, never, OpenRouterConfig> =>
 	Effect.gen(function* () {
+		const config = yield* Ref.get(configRef);
 		const message = yield* createMessageFromProto(protoMessage);
 
-		if (isGroupAllowed(message)) {
+		if (isGroupAllowed(config, message)) {
 			yield* logMessageToConsole(message);
 			yield* processMessageForEvent(message);
 		}
@@ -78,19 +76,20 @@ const handleIncomingMessage = (
 		Effect.catchAll((error) => Effect.logError(`Failed to handle message: ${error}`)),
 	);
 
-const createMessageHandler = (config: Config, appLayer: Layer.Layer<OpenRouterConfig>) => {
-	const isGroupAllowed = createIsGroupAllowedFilter(config);
-
+const createMessageHandler = (
+	configRef: Ref.Ref<Config>,
+	appLayer: Layer.Layer<OpenRouterConfig>,
+) => {
 	// Run in background fiber - this is the edge of our Effect program
 	// where we integrate with Baileys' non-Effect callback system
 	return (socket: WASocket, protoMessage: proto.IWebMessageInfo): void => {
-		Effect.runFork(handleIncomingMessage(protoMessage, socket, isGroupAllowed).pipe(Effect.provide(appLayer)));
+		Effect.runFork(handleIncomingMessage(protoMessage, socket, configRef).pipe(Effect.provide(appLayer)));
 	};
 };
 
 export {
 	createMessageHandler,
-	createIsGroupAllowedFilter,
+	isGroupAllowed,
 	handleIncomingMessage,
 	logMessageToConsole,
 };
