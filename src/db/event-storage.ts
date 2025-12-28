@@ -116,8 +116,6 @@ export const EventStorageLive = Layer.effect(
 						return new EventStorageError({ reason: `Failed to insert event: ${errorMsg}` });
 					},
 				});
-
-				yield* Effect.logInfo(`Event saved: "${input.event.title}" (slug: ${input.event.slug})`);
 			});
 
 		const findEventBySlug = (slug: string): Effect.Effect<StoredEvent, EventNotFoundError | EventStorageError> =>
@@ -190,7 +188,7 @@ export const EventStorageLive = Layer.effect(
 					return yield* Effect.fail(new EventNotFoundError({ slug }));
 				}
 
-				yield* Effect.logInfo(`Event deleted: ${slug}`);
+				yield* Effect.logInfo(`Evento eliminado: ${slug}`);
 			});
 
 		return {

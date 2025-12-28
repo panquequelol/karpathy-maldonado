@@ -277,7 +277,7 @@ const postChatCompletion = (
 			...(responseFormat === "json_object" ? { response_format: { type: "json_object" } } : {}),
 		});
 
-		yield* Effect.logDebug(`Calling OpenRouter API with model: ${config.model}`);
+		yield* Effect.logDebug(`Usando modelo: ${config.model}`);
 
 		const response = yield* fetchWithTimeout(
 			`${OPENROUTER_API_URL}/chat/completions`,
@@ -387,7 +387,7 @@ export const classifyMessage = (
 		const messagesJson = createClassificationPrompt(text);
 		const content = yield* postChatCompletionWithRetry(messagesJson, config, 100);
 
-		yield* Effect.logInfo(`Raw classification response: "${content}"`);
+		yield* Effect.logDebug(`Raw classification response: "${content}"`);
 
 		const cleaned = String(content)
 			.replace(/```json\n?/g, "")
@@ -401,11 +401,9 @@ export const classifyMessage = (
 		);
 
 		if (validResponse === "1") {
-			yield* Effect.logInfo("Message classified as parsable event");
 			return true;
 		}
 
-		yield* Effect.logInfo("Message classified as noise");
 		return false;
 	}).pipe(
 		Effect.catchAll((error) =>
@@ -422,26 +420,21 @@ export const extractEvent = (
 		const messagesJson = createExtractionPrompt(text, currentDate);
 		const content = yield* postChatCompletionWithRetry(messagesJson, config, 1000, "json_object");
 
-		yield* Effect.logInfo(`Raw extraction response: "${content}"`);
-
 		const cleaned = String(content)
 			.replace(/```json\n?/g, "")
 			.replace(/```\n?/g, "")
 			.trim();
 
-		yield* Effect.logInfo(`Cleaned extraction response: "${cleaned}"`);
+		yield* Effect.logDebug(`Cleaned extraction response: "${cleaned}"`);
 
 		const parsedJson = yield* Schema.decodeUnknown(Schema.parseJson())(cleaned).pipe(
 			Effect.mapError((error) => new SchemaValidationError({ reason: `Invalid JSON: ${error}` })),
 		);
 
-		yield* Effect.logInfo(`Parsed JSON: ${JSON.stringify(parsedJson, null, 2)}`);
-
 		const event = yield* Schema.decodeUnknown(EventSchema)(parsedJson).pipe(
 			Effect.mapError((error) => new SchemaValidationError({ reason: `Invalid event schema: ${error}` })),
 		);
 
-		yield* Effect.logInfo(`Extracted event: "${event.title}" at ${event.startAt}`);
 		return event;
 	}).pipe(
 		Effect.catchAll((error) =>
