@@ -21,9 +21,9 @@ const renderGroupSelector = (
 	const lines: string[] = [];
 
 	lines.push(ANSI.CLEAR_SCREEN);
-	lines.push(`${ANSI.BRIGHT}${ANSI.CYAN}Select a WhatsApp group to monitor:${ANSI.RESET}`);
+	lines.push(`${ANSI.BRIGHT}${ANSI.CYAN}Selecciona un grupo de WhatsApp para monitorear:${ANSI.RESET}`);
 	lines.push("");
-	lines.push(`${ANSI.DIM}Use ↑/↓ arrows to navigate, Enter to select${ANSI.RESET}`);
+	lines.push(`${ANSI.DIM}Usa las flechas ↑/↓ para navegar, Enter para seleccionar${ANSI.RESET}`);
 	lines.push("");
 	lines.push(`${ANSI.DIM}─${"─".repeat(60)}${ANSI.RESET}`);
 
@@ -45,14 +45,14 @@ const renderGroupSelector = (
 
 		lines.push(`${prefix} ${name}`);
 		lines.push(
-			`   ${ANSI.DIM}JID: ${group.id} • Members: ${group.participantCount}${ANSI.RESET}`,
+			`   ${ANSI.DIM}JID: ${group.id} • Miembros: ${group.participantCount}${ANSI.RESET}`,
 		);
 	}
 
 	if (groups.length > maxVisible) {
 		lines.push("");
 		lines.push(
-			`${ANSI.DIM}Showing ${startIdx + 1}-${Math.min(startIdx + maxVisible, groups.length)} of ${groups.length} groups${ANSI.RESET}`,
+			`${ANSI.DIM}Mostrando ${startIdx + 1}-${Math.min(startIdx + maxVisible, groups.length)} de ${groups.length} grupos${ANSI.RESET}`,
 		);
 	}
 
@@ -101,13 +101,13 @@ const runSelectorLoop = (
 			const selectedGroup = groups[selectedIndex];
 			if (selectedGroup) {
 				yield* display(
-					`\n\n${ANSI.BRIGHT}${ANSI.GREEN}Selected:${ANSI.RESET} ${selectedGroup.subject}\n`,
+					`\n\n${ANSI.BRIGHT}${ANSI.GREEN}Seleccionado:${ANSI.RESET} ${selectedGroup.subject}\n`,
 				);
 				yield* display(`${ANSI.DIM}JID: ${selectedGroup.id}${ANSI.RESET}\n\n`);
 				return selectedGroup;
 			}
 		} else if (isCancelKey(key)) {
-			yield* display("\n\nSelection cancelled.\n\n");
+			yield* display("\n\nSelección cancelada.\n\n");
 			return yield* Effect.fail(new Error("User cancelled selection"));
 		}
 	}
@@ -120,13 +120,13 @@ const selectGroupInteractively = (
 	groups: ReadonlyArray<GroupMetadata>,
 ): Effect.Effect<GroupMetadata, Error, Terminal.Terminal> => {
 	if (groups.length === 0) {
-		return Effect.fail(new Error("No groups available"));
+		return Effect.fail(new Error("No hay grupos disponibles"));
 	}
 
 	const firstGroup = groups[0];
 	if (groups.length === 1 && firstGroup) {
 		return Effect.gen(function* () {
-			yield* Effect.logInfo(`Only one group found, auto-selecting: ${firstGroup.subject}`);
+			yield* Effect.logInfo(`Solo se encontró un grupo, seleccionando automáticamente: ${firstGroup.subject}`);
 			return firstGroup;
 		});
 	}
