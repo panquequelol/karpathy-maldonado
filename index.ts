@@ -1,8 +1,10 @@
-import { Duration, Effect, Logger, Layer } from "effect";
+import { Duration, Effect, Logger, Layer, Option } from "effect";
+import { NodeTerminal } from "@effect/platform-node";
 import { connectToWhatsApp, type ConnectionState } from "./src/connection";
 import { createMessageHandler } from "./src/message-handler";
-import { loadConfig, type Config } from "./src/config";
-import { listAllGroups, logGroupsForDiscovery } from "./src/groups";
+import { loadConfig, type Config, type GroupJid } from "./src/config";
+import { listAllGroups } from "./src/groups";
+import { selectGroupInteractively } from "./src/group-selector";
 import { OpenRouterServiceLayer, ConfigError } from "./src/openrouter";
 
 /**
@@ -12,13 +14,16 @@ import { OpenRouterServiceLayer, ConfigError } from "./src/openrouter";
 const AppLoggerLive = Logger.pretty;
 
 /**
- * Main application layer combining logger and OpenRouter config.
+ * Main application layer combining logger, Terminal, and OpenRouter config.
  * ConfigError will be caught at runtime with proper handling.
  */
 const AppLayer = Layer.merge(
 	AppLoggerLive,
-	Layer.catchAll(OpenRouterServiceLayer, (error) =>
-		Layer.die(`OpenRouter configuration failed: ${error.reason}`),
+	Layer.merge(
+		NodeTerminal.layer,
+		Layer.catchAll(OpenRouterServiceLayer, (error) =>
+			Layer.die(`OpenRouter configuration failed: ${error.reason}`),
+		),
 	),
 );
 
@@ -64,15 +69,35 @@ const handleConnectionChange = (config: Config) => {
 
 /**
  * Handle post-connection tasks like listing groups for discovery.
+ * Returns Option<GroupJid> - some if a group was selected, none if monitoring mode.
  */
-const handleConnected = (socket: import("@whiskeysockets/baileys").WASocket, config: Config) =>
-	Effect.gen(function* () {
+const handleConnected = (
+	socket: import("@whiskeysockets/baileys").WASocket,
+	config: Config,
+) => Effect.gen(function* () {
 		if (config.mode === "discovery") {
 			const groups = yield* listAllGroups(socket);
-			yield* logGroupsForDiscovery(groups);
-			yield* Effect.sync(() => process.exit(0));
+
+			if (groups.length === 0) {
+				yield* Effect.logError("No WhatsApp groups found");
+				yield* Effect.sync(() => process.exit(1));
+				return Option.none();
+			}
+
+			const selectedGroup = yield* selectGroupInteractively(groups);
+			return Option.some(selectedGroup.id);
 		}
+
+		return Option.none();
 	});
+
+/**
+ * Create monitor config from selected group JID.
+ */
+const createMonitorConfig = (groupJid: GroupJid): Config => ({
+	mode: "monitor",
+	allowedGroupJids: [groupJid],
+}) as const;
 
 /**
  * Main WhatsApp listener program.
@@ -81,10 +106,27 @@ const startWhatsAppListener = (config: Config) =>
 	Effect.gen(function* () {
 		const handleMessage = createMessageHandler(config, AppLayer);
 
-		yield* connectToWhatsApp({
+		const socket = yield* connectToWhatsApp({
 			onStateChange: handleConnectionChange(config),
 			onConnected: (socket) => {
-				Effect.runFork(handleConnected(socket, config).pipe(Effect.provide(AppLayer)));
+				Effect.runFork(
+					handleConnected(socket, config).pipe(
+						Effect.provide(AppLayer),
+						Effect.flatMap((selectedJidOption) =>
+							Option.match(selectedJidOption, {
+								onNone: () => Effect.void,
+								onSome: (selectedJid) =>
+									Effect.gen(function* () {
+										const monitorConfig = createMonitorConfig(selectedJid);
+										yield* Effect.logInfo(`Now monitoring: ${selectedJid}`);
+										yield* Effect.sync(() => {
+											Effect.runFork(startWhatsAppListener(monitorConfig).pipe(Effect.provide(AppLayer)));
+										});
+									}),
+							}),
+						),
+					),
+				);
 			},
 			onMessage: handleMessage,
 			onReconnect: () => {
