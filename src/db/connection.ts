@@ -1,5 +1,5 @@
 import { Effect, Layer, Data, Context, Config, Secret, Option } from "effect";
-import { drizzle } from "drizzle-orm/d1";
+import { drizzle } from "drizzle-orm/libsql";
 import { createClient } from "@libsql/client";
 
 export type DatabaseConfig = {

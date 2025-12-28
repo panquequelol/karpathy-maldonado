@@ -1,11 +1,15 @@
 import { Duration, Effect, Logger, Layer, Ref } from "effect";
 import { NodeTerminal } from "@effect/platform-node";
-import { connectToWhatsApp, type ConnectionState } from "./src/connection";
+import { connectToWhatsApp, type ConnectionState, BASE_RECONNECT_DELAY_MS, MAX_RECONNECT_RETRIES } from "./src/connection";
 import { createMessageHandler } from "./src/message-handler";
 import { makeConfigRef, type ConfigRef, type MonitorConfig } from "./src/config";
 import { listAllGroups } from "./src/groups";
 import { selectGroupInteractively } from "./src/group-selector";
 import { OpenRouterServiceLayer, ConfigError } from "./src/openrouter";
+import { DatabaseLive, DatabaseConfigError } from "./src/db/connection";
+import { EventStorageLive } from "./src/db/event-storage";
+
+let reconnectRetryCount = 0;
 
 /**
  * Application logger layer using Effect's pretty logger.
@@ -14,15 +18,24 @@ import { OpenRouterServiceLayer, ConfigError } from "./src/openrouter";
 const AppLoggerLive = Logger.pretty;
 
 /**
- * Main application layer combining logger, Terminal, and OpenRouter config.
- * ConfigError will be caught at runtime with proper handling.
+ * Main application layer combining logger, Terminal, OpenRouter config, and database.
+ * ConfigError and DatabaseConfigError will be caught at runtime with proper handling.
  */
 const AppLayer = Layer.merge(
 	AppLoggerLive,
 	Layer.merge(
 		NodeTerminal.layer,
-		Layer.catchAll(OpenRouterServiceLayer, (error) =>
-			Layer.die(`OpenRouter configuration failed: ${error.reason}`),
+		Layer.merge(
+			Layer.catchAll(OpenRouterServiceLayer, (error) =>
+				Layer.die(`OpenRouter configuration failed: ${error.reason}`),
+			),
+			// Provide Database to EventStorageLive using Layer.provideMerge
+			Layer.provideMerge(
+				EventStorageLive,
+				Layer.catchAll(DatabaseLive, (error) =>
+					Layer.die(`Database configuration failed: ${error.reason}`),
+				),
+			),
 		),
 	),
 );
@@ -30,7 +43,7 @@ const AppLayer = Layer.merge(
 /**
  * Log configuration summary showing which groups are being monitored.
  */
-const logConfigSummary = (configRef: ConfigRef): Effect.Effect<void> =>
+const logConfigSummary = (configRef: ConfigRef) =>
 	Effect.gen(function* () {
 		const config = yield* Ref.get(configRef);
 		if (config.mode === "monitor") {
@@ -45,23 +58,27 @@ const logConfigSummary = (configRef: ConfigRef): Effect.Effect<void> =>
  * This is called from non-Effect code, so we run the Effect in the background.
  */
 const handleConnectionChange = (configRef: ConfigRef) => {
-	return (state: ConnectionState): void => {
+	return (state: ConnectionState, retryCount: number): void => {
 		Effect.runFork(
 			Effect.gen(function* () {
-				switch (state.status) {
-					case "connected":
+				switch (state._tag) {
+					case "Connected":
+						reconnectRetryCount = 0;
 						yield* Effect.logInfo("Conectado");
 						yield* logConfigSummary(configRef);
 						break;
-					case "disconnected":
-						if (state.shouldReconnect) {
-							yield* Effect.logWarning("Desconectado - reconectando...");
-						} else {
-							yield* Effect.logError("Desconectado de WhatsApp");
-						}
+					case "DisconnectedWithReconnect":
+						const delaySeconds = (BASE_RECONNECT_DELAY_MS * Math.pow(2.5, retryCount)) / 1000;
+						yield* Effect.logWarning(`Desconectado - reconectando en ${delaySeconds.toFixed(1)}s (intento ${retryCount + 1}/${MAX_RECONNECT_RETRIES + 1})...`);
 						break;
-					case "logged-out":
+					case "DisconnectedNoReconnect":
+						yield* Effect.logError("Desconectado de WhatsApp");
+						break;
+					case "LoggedOut":
 						yield* Effect.logWarning("Desconectado - escanea el código QR nuevamente");
+						break;
+					case "Connecting":
+						// No action needed
 						break;
 				}
 			}).pipe(Effect.provide(AppLayer)),
@@ -76,7 +93,8 @@ const handleConnectionChange = (configRef: ConfigRef) => {
 const handleConnected = (
 	socket: import("@whiskeysockets/baileys").WASocket,
 	configRef: ConfigRef,
-) => Effect.gen(function* () {
+) =>
+	Effect.gen(function* () {
 		const config = yield* Ref.get(configRef);
 
 		if (config.mode === "discovery") {
@@ -105,6 +123,9 @@ const handleConnected = (
 const startWhatsAppListener = (configRef: ConfigRef) =>
 	Effect.gen(function* () {
 		const handleMessage = createMessageHandler(configRef, AppLayer);
+		const runWithLayer = <R, E, A>(effect: Effect.Effect<A, E, R>) => {
+			Effect.runFork(Effect.provide(AppLayer)(effect) as Effect.Effect<A, E, never>);
+		};
 
 		const socket = yield* connectToWhatsApp({
 			onStateChange: handleConnectionChange(configRef),
@@ -116,9 +137,23 @@ const startWhatsAppListener = (configRef: ConfigRef) =>
 				);
 			},
 			onMessage: handleMessage,
-			onReconnect: () => {
-				Effect.runFork(startWhatsAppListener(configRef).pipe(Effect.provide(AppLayer)));
+			onReconnect: (_retryCount: number, _delay: number) => {
+				if (reconnectRetryCount > MAX_RECONNECT_RETRIES) {
+					runWithLayer(
+						Effect.gen(function* () {
+							yield* Effect.logError("Maximos reintentos de conexión alcanzados. Saliendo...");
+							yield* Effect.sync(() => process.exit(1));
+						}),
+					);
+					return;
+				}
+				const delay = BASE_RECONNECT_DELAY_MS * Math.pow(2.5, reconnectRetryCount);
+				reconnectRetryCount++;
+				setTimeout(() => {
+					Effect.runFork(startWhatsAppListener(configRef).pipe(Effect.provide(AppLayer)));
+				}, delay);
 			},
+			runWithLayer,
 		});
 
 		// Keep the Effect alive indefinitely - the socket event handlers

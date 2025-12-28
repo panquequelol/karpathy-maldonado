@@ -37,13 +37,16 @@ interface WhatsAppMessage {
 	readonly groupJid: GroupJid | null;
 }
 
-interface ConnectionState {
-	readonly status: "disconnected" | "connecting" | "connected" | "logged-out";
-	readonly shouldReconnect: boolean;
-}
+type ConnectionState =
+	| { readonly _tag: "Connecting" }
+	| { readonly _tag: "Connected" }
+	| { readonly _tag: "DisconnectedWithReconnect"; readonly isConflict: boolean }
+	| { readonly _tag: "DisconnectedNoReconnect" }
+	| { readonly _tag: "LoggedOut" };
 
 class MessageParseError extends Data.TaggedError("MessageParseError")<{
 	readonly reason: "MissingKey" | "MissingMessage";
+	readonly jid?: string;
 }> {
 	override readonly message = "Failed to parse WhatsApp message";
 }
@@ -125,10 +128,10 @@ const createMessageFromProto = (
 		const { key, message, messageTimestamp } = protoMessage;
 
 		if (!key) {
-			return yield* Effect.fail(new MessageParseError({ reason: "MissingKey" }));
+			return yield* Effect.fail(new MessageParseError({ reason: "MissingKey", jid: "unknown" }));
 		}
 		if (!message) {
-			return yield* Effect.fail(new MessageParseError({ reason: "MissingMessage" }));
+			return yield* Effect.fail(new MessageParseError({ reason: "MissingMessage", jid: key.remoteJid ?? "unknown" }));
 		}
 
 		const isGroup = key.remoteJid?.endsWith("@g.us") ?? false;
