@@ -1,17 +1,15 @@
-import { Effect, Layer, Data, Schema, Context } from "effect";
+import { Effect, Layer, Data, Schema, Context, Config, Secret } from "effect";
 
-const OPENROUTER_API_KEY = "OPENROUTER_API_KEY";
-const OPENROUTER_MODEL = "OPENROUTER_MODEL";
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1";
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_RETRIES = 3;
 const BASE_RETRY_DELAY_MS = 1_000;
 
-export interface OpenRouterConfig {
+export type OpenRouterConfig = {
 	readonly apiKey: string;
 	readonly model: string;
-}
+};
 
 export class ConfigError extends Data.TaggedError("ConfigError")<{
 	readonly reason: string;
@@ -23,23 +21,18 @@ export const OpenRouterConfig = Context.GenericTag<OpenRouterConfig>("OpenRouter
 
 export const loadConfig = (): Effect.Effect<OpenRouterConfig, ConfigError> =>
 	Effect.gen(function* () {
-		const apiKey = process.env[OPENROUTER_API_KEY];
-		const model = process.env[OPENROUTER_MODEL];
-
-		if (!apiKey) {
-			return yield* Effect.fail(
-				new ConfigError({ reason: `Missing ${OPENROUTER_API_KEY} environment variable` }),
-			);
-		}
-
-		if (!model) {
-			return yield* Effect.fail(
-				new ConfigError({ reason: `Missing ${OPENROUTER_MODEL} environment variable` }),
-			);
-		}
+		const apiKeySecret = yield* Config.secret("OPENROUTER_API_KEY").pipe(
+			Config.withDescription("OpenRouter API key"),
+		);
+		const model = yield* Config.string("OPENROUTER_MODEL").pipe(
+			Config.withDescription("OpenRouter model identifier"),
+		);
+		const apiKey = Secret.value(apiKeySecret);
 
 		return { apiKey, model } as const;
-	});
+	}).pipe(
+		Effect.mapError((error) => new ConfigError({ reason: String(error) })),
+	);
 
 const ClassificationResponseSchema = Schema.Union(
 	Schema.Literal("0"),

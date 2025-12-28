@@ -166,7 +166,7 @@ const formatMessageForLog = (message: WhatsAppMessage): string => {
 	return content || `[${message.type}]`;
 };
 
-export type { ConnectionState, GroupJid, Jid, MediaInfo, MessageTypeValue, WhatsAppMessage };
+export type { ConnectionState, GroupJid, Jid, MediaInfo, MessageTypeValue, UserJid, WhatsAppMessage };
 export {
 	MessageParseError,
 	createMessageFromProto,
