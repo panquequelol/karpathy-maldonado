@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Install dependencies
-bun install
+pnpm install
 
 # Copy .env file
 cp $CONDUCTOR_ROOT_PATH/.env .env
