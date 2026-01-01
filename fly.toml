@@ -1,0 +1,26 @@
+app = "karpathy-maldonado-whatsapp"
+primary_region = "gru"
+
+[build]
+dockerfile = "Dockerfile"
+
+[env]
+NODE_ENV = "production"
+
+# Persistent volume for WhatsApp auth session
+# Baileys stores authentication credentials here
+[mounts]
+source = "auth_info"
+destination = "/app/auth_info"
+
+# No HTTP service needed - this is a background worker
+# But fly.io requires at least one service check
+[http_service]
+internal_port = 8080
+auto_stop_machines = false
+auto_start_machines = true
+
+[[vm]]
+cpu_kind = "shared"
+cpus = 1
+memory_mb = 512
